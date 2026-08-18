@@ -1,5 +1,6 @@
 import logging
 import re
+import uuid
 from enum import Enum
 from io import BytesIO
 
@@ -9,6 +10,7 @@ from pypdf import PdfReader
 from docx import Document as DocxDocument
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+import google.generativeai as genai
 
 from app.db.database import AsyncSessionLocal
 
@@ -112,7 +114,7 @@ async def _extract_from_database(table_name: str) -> str:
 
     lines = []
     for row in rows:
-        row_text = ", ".join(f"{key}: {value}" for key, value in row.items() if value is not None)
+        row_text = ", ".join(f"{key}: {value}" for row in rows for key, value in row.items() if value is not None)
         lines.append(row_text)
 
     return "\n".join(lines)
@@ -138,3 +140,52 @@ def _clean_text(text: str) -> str:
     lines = [line.strip() for line in text.splitlines()]
     lines = [line for line in lines if line]
     return "\n".join(lines).strip()
+
+
+
+
+async def embed_vectors(chunks: list[str], document_id: str, db: AsyncSession) -> None:
+    """
+    Loops through the text chunks, calls the Gemini embedding AI model to convert 
+    them into mathematical vectors, and saves them permanently into the database.
+    """
+    try:
+        for chunk_text in chunks:
+            # 1. Generate the vector using Google Gemini
+            embedding_response = genai.embed_content(
+                model="models/gemini-embedding-001",
+                content=chunk_text,
+                task_type="retrieval_document"
+            )
+            
+            # The API returns a list of floats (3072 dimensions)
+            vector_array = embedding_response['embedding']
+            
+            # Format the vector as a string so PostgreSQL's pgvector extension can read it
+            formatted_vector = f"[{','.join(map(str, vector_array))}]"
+            
+            # 2. Generate a unique ID for this chunk
+            chunk_id = str(uuid.uuid4())
+            
+            # 3. Save to database using raw SQL text mapping to your schema
+            insert_query = text("""
+                INSERT INTO chunking_table (id, document_id, content_text, vector_embedding)
+                VALUES (:id, :document_id, :content_text, :vector_embedding)
+            """)
+            
+            await db.execute(insert_query, {
+                "id": chunk_id,
+                "document_id": document_id,
+                "content_text": chunk_text,
+                "vector_embedding": formatted_vector
+            })
+        
+        # 4. Commit all inserted chunks to the database
+        await db.commit()
+        logger.info(f"Successfully embedded and saved {len(chunks)} chunks for document {document_id}")
+        
+    except Exception as e:
+        # If anything fails, rollback so we don't save partial data
+        await db.rollback()
+        logger.error(f"Failed to embed vectors for document {document_id}: {e}")
+        raise DocumentProcessingError(f"Embedding failed: {e}")
