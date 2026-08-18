@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+pydantic
+
+sqlalchemy[asyncio]
+asyncpg
+pgvector
+
+httpx
+beautifulsoup4
+pypdf
+python-docx
+
+google-generativeai
