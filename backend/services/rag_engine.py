@@ -1,5 +1,6 @@
 import logging
 import re
+from services.ai_factory import get_dynamic_embeddings
 import uuid
 from enum import Enum
 from io import BytesIO
@@ -12,7 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 import google.generativeai as genai
 
-from app.db.database import AsyncSessionLocal
+from database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,7 @@ async def _extract_from_database(table_name: str) -> str:
         )
 
     try:
-        async with AsyncSessionLocal() as session:  # type: AsyncSession
+        async with AsyncSessionLocal() as session:  
             result = await session.execute(text(f"SELECT * FROM {table_name}"))
             rows = result.mappings().all()
     except Exception as e:
@@ -146,28 +147,23 @@ def _clean_text(text: str) -> str:
 
 async def embed_vectors(chunks: list[str], document_id: str, db: AsyncSession) -> None:
     """
-    Loops through the text chunks, calls the Gemini embedding AI model to convert 
-    them into mathematical vectors, and saves them permanently into the database.
+    Loops through the text chunks, calls the factory embedding model, 
+    and saves them permanently into the database.
     """
     try:
-        for chunk_text in chunks:
-            # 1. Generate the vector using Google Gemini
-            embedding_response = genai.embed_content(
-                model="models/gemini-embedding-001",
-                content=chunk_text,
-                task_type="retrieval_document"
-            )
+        # 1. Get the dynamic embedding model from your factory
+        embeddings_model = get_dynamic_embeddings()
+        
+        # 2. Embed all chunks at once using LangChain's async method
+        vectors = await embeddings_model.aembed_documents(chunks)
+        
+        # 3. Loop through the returned vectors and save them
+        for chunk_text, vector_array in zip(chunks, vectors):
             
-            # The API returns a list of floats (3072 dimensions)
-            vector_array = embedding_response['embedding']
-            
-            # Format the vector as a string so PostgreSQL's pgvector extension can read it
+            # Format for PostgreSQL pgvector
             formatted_vector = f"[{','.join(map(str, vector_array))}]"
-            
-            # 2. Generate a unique ID for this chunk
             chunk_id = str(uuid.uuid4())
             
-            # 3. Save to database using raw SQL text mapping to your schema
             insert_query = text("""
                 INSERT INTO chunking_table (id, document_id, content_text, vector_embedding)
                 VALUES (:id, :document_id, :content_text, :vector_embedding)
@@ -185,7 +181,6 @@ async def embed_vectors(chunks: list[str], document_id: str, db: AsyncSession) -
         logger.info(f"Successfully embedded and saved {len(chunks)} chunks for document {document_id}")
         
     except Exception as e:
-        # If anything fails, rollback so we don't save partial data
         await db.rollback()
         logger.error(f"Failed to embed vectors for document {document_id}: {e}")
         raise DocumentProcessingError(f"Embedding failed: {e}")
