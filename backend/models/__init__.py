@@ -5,3 +5,4 @@ from .guest import Guest
 from .knowledge import KnowledgeBase, Document, ChunkingTable
 from .chat import SessionContext, MessageLog, IntentLog, RagCitation, EscalationTicket
 from .booking import RoomBooking
+from .hotel_package import HotelPackage

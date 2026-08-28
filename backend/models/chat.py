@@ -4,13 +4,19 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import String, Text, ForeignKey, DateTime, Numeric
 from database import Base
 
+from sqlalchemy import Integer
+# (Make sure Integer is imported from sqlalchemy at the top)
+
 class SessionContext(Base):
     __tablename__ = 'session_context'
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     hotel_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('hotel.id'))
-    guest_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('guest.id'))
-    status: Mapped[str] = mapped_column(String(50))
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    guest_id: Mapped[str] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(50)) # e.g., "active", "ended"
+    started_at = mapped_column(DateTime, default=datetime.utcnow)
+    
+    # --- NEW COLUMN ---
+    rating: Mapped[int] = mapped_column(Integer, nullable=True)
 
 class MessageLog(Base):
     __tablename__ = 'message_log'
